@@ -2,7 +2,18 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 import json
 import hashlib
+import sqlite3
 
+
+
+def center_main_window(root, width, height):
+    root.geometry(f"{width}x{height}")
+    root.update_idletasks()
+
+    x = (root.winfo_screenwidth() - width) // 2
+    y = (root.winfo_screenheight() - height) // 2
+
+    root.geometry(f"{width}x{height}+{x}+{y}")
 
 class BankAccount:
     def __init__(self, owner, balance=0.0, password=None):
@@ -59,13 +70,108 @@ class BankAccount:
     def __str__(self):
         return f"Аккаунт {self.owner} - {self.balance:.2f} руб."
 
+class Database_manager:
+    def __init__(self, db_path="bank_accounts.db"):
+        self.db_path = db_path
+        self.init_database()
+
+    def init_database(self):
+        """Создает таблицу accounts, если ее нет"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner TEXT UNIQUE NOT NULL,
+                balance REAL NOT NULL,
+                password TEXT NOT NULL
+            )
+        ''')
+
+        conn.commit()
+        conn.close()
+
+    def save_account(self, account):
+        """Сохраняет новый аккаунт в базу данных"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO accounts(owner, balance, password)
+                VALUES(?, ?, ?)
+            ''', (account.owner, account.balance, account.password))
+
+            conn.commit()
+            print(f"account {account.owner} saved")
+
+        except sqlite3.IntegrityError:
+            raise ValueError(f"account {account.owner} already exists")
+        finally:
+            conn.close()
+
+    def update_account_balance(self, owner, new_balance):
+        """Обновляет баланс аккаунта в базе данных"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE accounts
+            WHERE owner=?
+            AND balance=?
+        ''', (owner, new_balance))
+
+        conn.commit()
+        conn.close()
+
+    def load_all_accounts(self):
+        """Загружает все аккаунты из базы данных"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT owner, balance, password FROM accounts
+        ''')
+
+        rows = cursor.fetchall()
+
+        accounts = []
+        for row in rows:
+            owner, balance, password = row
+            account = BankAccount(owner, balance)
+            account._password = password
+            accounts.append(account)
+
+        conn.close()
+        return accounts
+
+    def account_exists(self, owner):
+        """Проверяет существование аккаунтов в базе данных"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM accounts
+            WHERE owner=?
+        ''', (owner,))
+
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count > 0
+
+    #TODO: Добавить метод для удаления из БД
+
+
+
+
 
 class BankApp:
     def __init__(self, root):
         self.root = root
         self.accounts = []
         self.root.title("Bank Accounts")
-        self.root.geometry("500x500")
+        center_main_window(self.root, 500, 500)
 
 
         btn_create = tk.Button(root, text="Создать аккаунт", command=self.open_create_account_window)
@@ -89,25 +195,25 @@ class BankApp:
     def open_create_account_window(self):
         window = tk.Toplevel(self.root)
         window.title("Создание аккаунта")
-        window.geometry("200x300")
+        center_main_window(window, 300, 300)
         tk.label_create = tk.Label(window, text="Создание нового аккаунта", font=("Arial", 13, "bold"), fg="#7B68EE")
-        tk.label_create.place(x=10, y=10)
+        tk.label_create.place(x=40, y=10)
 
-        tk.label_name = tk.Label(window, text="Имя владельца").place(x=10, y=50)
+        tk.label_name = tk.Label(window, text="Имя владельца").place(x=90, y=50)
         entry_name = tk.Entry(window)
-        entry_name.place(x=10, y=70)
+        entry_name.place(x=90, y=70)
 
-        tk.label_balance = tk.Label(window, text="Начальный баланс").place(x=10, y=100)
+        tk.label_balance = tk.Label(window, text="Начальный баланс").place(x=90, y=100)
         entry_balance = tk.Entry(window)
-        entry_balance.place(x=10, y=120)
+        entry_balance.place(x=90, y=120)
 
-        tk.label_password = tk.Label(window, text="Пароль").place(x=10, y=150)
+        tk.label_password = tk.Label(window, text="Пароль").place(x=90, y=150)
         entry_password = tk.Entry(window, show="*")
-        entry_password.place(x=10, y=170)
+        entry_password.place(x=90, y=170)
 
-        tk.label_password_confirm = tk.Label(window, text="Подтвердить пароль").place(x=10, y=200)
+        tk.label_password_confirm = tk.Label(window, text="Подтвердить пароль").place(x=90, y=200)
         entry_password_confirm = tk.Entry(window, show="*")
-        entry_password_confirm.place(x=10, y=220)
+        entry_password_confirm.place(x=90, y=220)
 
 
         def create_account():
@@ -141,7 +247,7 @@ class BankApp:
             window.destroy()
 
         btn_create = tk.Button(window, text="Создать аккаунт", command=create_account, bg="#EE82EE")
-        btn_create.place(x=10, y=250)
+        btn_create.place(x=90, y=250)
 
 
 
@@ -149,11 +255,11 @@ class BankApp:
     def open_transfer_money_window(self):
         window = tk.Toplevel(self.root)
         window.title("Перевод средств")
-        window.geometry("300x250")
+        center_main_window(window, 300, 300)
 
-        tk.label_sender = tk.Label(window, text="Отправитель").place(x=10, y=30)
+        tk.label_sender = tk.Label(window, text="Отправитель").place(x=20, y=30)
         entry_sender = tk.Entry(window)
-        entry_sender.place(x=10, y=50)
+        entry_sender.place(x=20, y=50)
 
         tk.label_receiver = tk.Label(window, text="Получатель").place(x=150, y=30)
         entry_receiver = tk.Entry(window)
