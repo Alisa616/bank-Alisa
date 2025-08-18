@@ -160,7 +160,75 @@ class Database_manager:
         conn.close()
         return count > 0
 
-    #TODO: Добавить метод для удаления из БД
+    def delete_account(self, owner):
+        """Удаление аккаунта"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            DELETE FROM accounts
+            WHERE owner=?
+        ''', (owner,))
+
+
+        conn.commit()
+        rows_affected = cursor.rowcount
+        conn.close()
+
+        print(f"account {owner} deleted")
+        return rows_affected > 0
+
+    def update_accounts_after_transfer(self, sender_owner, sender_balance, receiver_owner, receiver_balance):
+        """Обновляет баланс аккаунтов после перевода(транзакции)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('BEGIN TRANSACTION')
+
+            cursor.execute("""
+                UPDATE accounts
+                SET balance=?
+                WHERE owner=?
+                """, (sender_owner, sender_balance))
+
+
+            cursor.execute("""
+                UPDATE accounts
+                SET balance=?
+                WHERE owner=?
+                """, (receiver_owner, receiver_balance))
+
+            conn.commit()
+            return True
+
+        except Exception as e:
+            conn.rollback()
+            raise e
+
+        finally:
+            conn.close()
+
+    def get_account(self, owner):
+        """Получает один аккаунт из базы данных"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT owner, balance, password
+            FROM accounts''', (owner,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            owner, balance, password = row
+            account = BankAccount(owner, balance)
+            account._password = password
+            return account
+        return None
+
+
 
 
 
@@ -169,6 +237,7 @@ class Database_manager:
 class BankApp:
     def __init__(self, root):
         self.root = root
+        self.db_manager = Database_manager()
         self.accounts = []
         self.root.title("Bank Accounts")
         center_main_window(self.root, 500, 500)
@@ -180,9 +249,12 @@ class BankApp:
         btn_transfer = tk.Button(root, text="Перевод средств", command=self.open_transfer_money_window)
         btn_transfer.place(x=0, y=30)
 
+        scrollbar = tk.Scrollbar(root)
+        scrollbar.place(x=250, y=70, height=200)
         self.label_accounts = tk.Label(root, text="Список аккаунтов").place(x=250, y=50)
-        self.listbox_accounts = tk.Listbox(root, height=6, width=40)
+        self.listbox_accounts = tk.Listbox(root, height=12, width=40, yscrollcommand=scrollbar.set)
         self.listbox_accounts.place(x=250, y=70)
+        scrollbar.config(command=self.listbox_accounts.yview)
 
 
 
@@ -235,16 +307,21 @@ class BankApp:
                 messagebox.showerror("Ошибка", "Заполните поле пароля")
                 return
 
-            account = BankAccount(name)
-            account.set_password(password)
-            account.deposit(float(balance))
-            self.accounts.append(account)
-            self.update_account_list()
-            messagebox.showinfo("Успех", f"Аккаунт для {entry_name.get()} создан")
-            entry_name.delete(0, tk.END)
-            entry_balance.delete(0, tk.END)
+            try:
+                account = BankAccount(name)
+                account.set_password(password)
+                account.deposit(float(balance))
+                self.accounts.append(account)
+                self.db_manager.save_account(account)
+                self.update_account_list()
+                messagebox.showinfo("Успех", f"Аккаунт для {entry_name.get()} создан")
+                entry_name.delete(0, tk.END)
+                entry_balance.delete(0, tk.END)
 
-            window.destroy()
+                window.destroy()
+
+            except Exception as e:
+                messagebox.showerror("Ошибка",str(e))
 
         btn_create = tk.Button(window, text="Создать аккаунт", command=create_account, bg="#EE82EE")
         btn_create.place(x=90, y=250)
@@ -280,21 +357,27 @@ class BankApp:
             receiver_name = entry_receiver.get().strip()
             sum_text = entry_sum.get().strip()
             password = entry_password.get().strip()
+
             if not sender_name or not receiver_name or not sum_text or not password:
                 messagebox.showerror("Ошибка", "Введите значение")
                 return
-            if not sum_text.lstrip('-').isdigit():
-                messagebox.showerror("Ошибка", f"Введите число {sum_text}")
+
+            try:
+                amount = float(sum_text)
+                if amount < 0:
+                    messagebox.showerror("Ошибка", "Сумма должна быть положительна")
+                    return
+            except ValueError:
+                messagebox.showerror("Ошибка", "Сумма должна быть числом")
                 return
-            sender = None
-            receiver = None
-            for account in self.accounts:
-                if sender_name == account.owner:
-                    sender = account
-                    break
+
+            sender = self.db_manager.get_account(sender_name)
             if sender is None:
                 messagebox.showerror("Ошибка", "Отправитель не найден")
                 return
+
+
+
             for account in self.accounts:
                 if receiver_name == account.owner:
                     receiver = account
